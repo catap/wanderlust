@@ -3717,6 +3717,8 @@ Return non-nil if the mark is updated"
 			wl-summary-buffer-temp-mark-list temp-list
 			wl-summary-buffer-temp-mark-column temp-column)
 		  (wl-summary-delete-all-temp-marks 'no-msg 'force)
+                  ;; Remove charset text property to prevent ctext encoder from using wrong charsets
+                  (remove-text-properties (point-min) (point-max) '(charset nil))
 		  (encode-coding-region
 		   (point-min) (point-max)
 		   (or (mime-charset-to-coding-system charset 'LF)
