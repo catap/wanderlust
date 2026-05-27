@@ -112,6 +112,8 @@
 (defvar-local wl-summary-buffer-weekday-name-lang  nil)
 (defvar-local wl-summary-buffer-thread-indent-set nil)
 (defvar-local wl-summary-buffer-view nil)
+(defvar-local wl-summary-buffer-sort-spec nil)
+(defvar-local wl-summary-buffer-sort-reverse nil)
 (defvar-local wl-summary-buffer-message-modified nil)
 (defvar-local wl-summary-buffer-thread-modified nil)
 
@@ -918,6 +920,9 @@ you."
    wl-summary-buffer-mode-line-formatter
    wl-summary-mode-line-format
    wl-summary-mode-line-format-spec-alist)
+  (setq wl-summary-buffer-sort-spec
+	(symbol-name wl-summary-default-sort-spec)
+	wl-summary-buffer-sort-reverse nil)
   (setq wl-summary-buffer-persistent
 	(wl-folder-persistent-p (elmo-folder-name-internal folder)))
   (elmo-folder-set-persistent-internal folder wl-summary-buffer-persistent)
@@ -1109,8 +1114,15 @@ This function is defined by `wl-summary-define-sort-command'." sort-by)
 	 (and disable-thread wl-summary-divide-thread-when-subject-changed))
 	num
 	expunged)
+    (unless sort-by
+      (setq sort-by (or wl-summary-buffer-sort-spec
+			(symbol-name wl-summary-default-sort-spec))
+	    reverse wl-summary-buffer-sort-reverse))
     (erase-buffer)
     (message "Re-scanning...")
+    (when sort-by
+      (setq wl-summary-buffer-sort-spec sort-by
+	    wl-summary-buffer-sort-reverse reverse))
     (when (and sort-by numbers)
       (let ((action  (if reverse "Reverse sorting" "Sorting")))
 	(message "%s by %s..." action sort-by)
@@ -2056,6 +2068,14 @@ This function is defined for `window-scroll-functions'"
 		(when (and sync-all (eq wl-summary-buffer-view 'thread))
 		  (elmo-kill-buffer wl-summary-search-buf-name)
 		  (wl-thread-insert-top))
+		(when (or append-list
+			  (and delete-list
+			       (eq wl-summary-buffer-view 'thread)
+			       wl-summary-search-parent-by-subject-regexp))
+		  (wl-summary-rescan
+		   nil nil disable-killed
+		   (and (eq wl-summary-buffer-view 'thread)
+			wl-summary-search-parent-by-subject-regexp)))
 		(run-hooks 'wl-summary-sync-updated-hook)
 		(setq mes
 		      (if (and (null delete-list)
@@ -2276,6 +2296,8 @@ If ARG, without confirm."
 	(folder wl-summary-buffer-elmo-folder)
 	(copy-variables
 	 (append '(wl-summary-buffer-view
+		   wl-summary-buffer-sort-spec
+		   wl-summary-buffer-sort-reverse
 		   wl-summary-buffer-temp-mark-list
 		   wl-summary-buffer-target-mark-list
 		   wl-summary-buffer-elmo-folder
