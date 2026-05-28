@@ -3716,7 +3716,7 @@ last:NUM         Move to the filter folder(partial filter).
 @findex wl-summary-sort
 Sort summary order.
 You can sort by @samp{date}, @samp{from}, @samp{number}, @samp{subject},
-@samp{size} and @samp{list-info}.
+@samp{size}, @samp{list-info} and @samp{thread-max-date}.
 With prefix argument, sort summary lines into reverse order.
 (@code{wl-summary-sort})
 

@@ -224,7 +224,7 @@ See also variable `wl-use-petname'."
 	  string)
     string))
 
-(defvar wl-summary-sort-specs '(number date subject from list-info size))
+(defvar wl-summary-sort-specs '(number date thread-max-date subject from list-info size))
 (defvar wl-summary-default-sort-spec 'date)
 
 (defvar wl-summary-mode-menu-spec
@@ -257,6 +257,7 @@ See also variable `wl-use-petname'."
      ["By Number" wl-summary-sort-by-number t]
      ["By Size" wl-summary-sort-by-size t]
      ["By Date" wl-summary-sort-by-date t]
+     ["By Thread Max Date" wl-summary-sort-by-thread-max-date t]
      ["By From" wl-summary-sort-by-from t]
      ["By Subject" wl-summary-sort-by-subject t]
      ["By List Info" wl-summary-sort-by-list-info t])
@@ -1005,6 +1006,73 @@ Entering Folder mode calls the value of `wl-summary-mode-hook'."
        (elmo-message-entity-field y 'date))
     (error))) ;; ignore error.
 
+(defun wl-summary-thread-max-date-entity-date (entity)
+  (or (and entity (elmo-message-entity-field entity 'date))
+      (seconds-to-time 0)))
+
+(defun wl-summary-thread-max-date-less-p (x y)
+  (condition-case nil
+      (time-less-p x y)
+    (error))) ;; ignore error.
+
+(defun wl-summary-thread-root-entity (folder entity)
+  (let ((root entity)
+	parent
+	seen)
+    (while (and root
+		(not (memq (elmo-message-entity-number root) seen))
+		(setq parent
+		      (condition-case nil
+			  (elmo-message-entity-parent folder root)
+			(error nil)))
+		(or (not wl-summary-divide-thread-when-subject-changed)
+		    (wl-summary-subject-equal
+		     (or (elmo-message-entity-field root 'subject) "")
+		     (or (elmo-message-entity-field parent 'subject) ""))))
+      (setq seen (cons (elmo-message-entity-number root) seen)
+	    root parent))
+    root))
+
+(defun wl-summary-sort-function-by-thread-max-date (numbers reverse)
+  (let ((folder wl-summary-buffer-elmo-folder)
+	(roots (elmo-make-hash))
+	(dates (elmo-make-hash)))
+    (dolist (number numbers)
+      (let* ((entity (elmo-message-entity folder number))
+	     (root (wl-summary-thread-root-entity folder entity))
+	     (root-number (or (and root
+				   (elmo-message-entity-number root))
+			      number))
+	     (date (wl-summary-thread-max-date-entity-date entity)))
+	(puthash number root-number roots)
+	(when (or (not (gethash root-number dates))
+		  (wl-summary-thread-max-date-less-p
+		   (gethash root-number dates) date))
+	  (puthash root-number date dates))))
+    (lambda (x y)
+      (let* ((x-number (elmo-message-entity-number x))
+	     (y-number (elmo-message-entity-number y))
+	     (x-root (gethash x-number roots))
+	     (y-root (gethash y-number roots))
+	     (same-root (= x-root y-root))
+	     (x-date (if same-root
+			 (wl-summary-thread-max-date-entity-date x)
+		       (or (gethash x-root dates)
+			   (wl-summary-thread-max-date-entity-date x))))
+	     (y-date (if same-root
+			 (wl-summary-thread-max-date-entity-date y)
+		       (or (gethash y-root dates)
+			   (wl-summary-thread-max-date-entity-date y)))))
+	(cond
+	 ((wl-summary-thread-max-date-less-p x-date y-date)
+	  (not reverse))
+	 ((wl-summary-thread-max-date-less-p y-date x-date)
+	  reverse)
+	 (same-root
+	  (< x-number y-number))
+	 (t
+	  (< x-root y-root)))))))
+
 (defun wl-summary-overview-entity-compare-by-number (x y)
    "Compare entity X and Y by number."
   (<
@@ -1062,23 +1130,27 @@ If optional argument REVERSE is non-nil, sort into reverse order.
 
 This function is defined by `wl-summary-define-sort-command'." sort-by)
 	     (interactive "P")
-	     (wl-summary-rescan ,(symbol-name sort-by) reverse)))))
+	     (wl-summary-rescan ,(symbol-name sort-by) reverse nil t)))))
 
-(defun wl-summary-sort-function-from-spec (spec reverse)
-  (let (function)
+(defun wl-summary-sort-function-from-spec (spec reverse &optional numbers)
+  (let (builder function)
     (when (string-match "^!\\(.+\\)$" spec)
       (setq spec (match-string 1 spec)
 	    reverse (not reverse)))
-    (setq function
-	  (intern (format "wl-summary-overview-entity-compare-by-%s" spec)))
-    (if reverse
-	`(lambda (x y) (not (,function x y)))
-      function)))
+    (setq builder
+	  (intern-soft (format "wl-summary-sort-function-by-%s" spec)))
+    (if (and builder (fboundp builder))
+	(funcall builder numbers reverse)
+      (setq function
+	    (intern (format "wl-summary-overview-entity-compare-by-%s" spec)))
+      (if reverse
+	  `(lambda (x y) (not (,function x y)))
+	function))))
 
 (defun wl-summary-sort-messages (numbers sort-by reverse)
   (let* ((functions (mapcar
 		     (lambda (spec)
-		       (wl-summary-sort-function-from-spec spec reverse))
+		       (wl-summary-sort-function-from-spec spec reverse numbers))
 		     (if (listp sort-by) sort-by (list sort-by))))
 	 (predicate (if (= (length functions) 1)
 			(car functions)
@@ -1106,7 +1178,8 @@ This function is defined by `wl-summary-define-sort-command'." sort-by)
 	(buffer-read-only nil)
 	(numbers (elmo-folder-list-messages wl-summary-buffer-elmo-folder
 					    (not disable-killed) t)) ; in-msgdb
-	(wl-thread-saved-entity-hashtb-internal (and (not disable-thread)
+	(wl-thread-saved-entity-hashtb-internal (and (not sort-by)
+						     (not disable-thread)
 						     wl-thread-entity-hashtb))
 	(wl-summary-search-parent-by-subject-regexp
 	 (and disable-thread wl-summary-search-parent-by-subject-regexp))
@@ -1946,7 +2019,7 @@ This function is defined for `window-scroll-functions'"
 	       wl-summary-sort-specs))
       nil t nil nil
       default-value)
-     reverse)))
+     reverse nil t)))
 
 (defun wl-summary-get-available-flags (&optional include-specials)
   (let ((flags (elmo-uniq-list
