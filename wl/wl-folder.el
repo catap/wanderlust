@@ -594,23 +594,32 @@ Optional argument ARG is repeart count."
     (let ((path (wl-folder-get-path
 		 wl-folder-entity
 		 (wl-folder-get-entity-id entity)
-		 entity)))
+		 entity))
+	  group-name group-entity)
       (if (not is-group)
 	  ;; delete itself from path
 	  (setq path (delete (nth (- (length path) 1) path) path)))
       (goto-char (point-min))
       (catch 'done
 	(while path
+	  (setq group-name (cond
+			    ((eq (car path) 0) nil)
+			    ((stringp (car path)) (car path))
+			    (t (wl-folder-get-folder-name-by-id (car path))))
+		group-entity (cond
+			      ((eq (car path) 0) wl-folder-entity)
+			      (group-name
+			       (wl-folder-search-group-entity-by-name
+				group-name wl-folder-entity))))
 	  ;; goto the path line.
 	  (if (or (eq (car path) 0) ; update desktop
-		  (wl-folder-buffer-search-group
-		   (wl-folder-get-petname
-		    (if (stringp (car path))
-			(car path)
-		      (wl-folder-get-folder-name-by-id
-		       (car path))))))
+		  (and group-name
+		       (wl-folder-buffer-search-group
+			(wl-folder-get-petname group-name))))
 	      ;; update it.
-	      (wl-folder-update-diff-line diffs)
+	      (if group-entity
+		  (wl-folder-update-line (wl-folder-calc-finfo group-entity))
+		(wl-folder-update-diff-line diffs))
 	    (throw 'done t))
 	  (setq path (cdr path)))))))
 
@@ -2220,11 +2229,12 @@ Use `wl-subscribed-mailing-list'."
 			   (match-end 2))
 	    (goto-char (match-beginning 2))
 	    (insert (format "%s/%s/%s"
-			    (or (nth 0 nums) "*")
-			    (or (and (nth 0 nums)(nth 1 nums)
+			    (or (nth 0 nums) (and is-group 0) "*")
+			    (or (and is-group (or (nth 1 nums) 0))
+				(and (nth 0 nums)(nth 1 nums)
 				     (+ (nth 0 nums)(nth 1 nums)))
 				"*")
-			    (or (nth 2 nums) "*")))
+			    (or (nth 2 nums) (and is-group 0) "*")))
 	    (wl-folder-put-folder-property (match-beginning 2) (point) id is-group)
 	    (if is-group
 		;; update only colors
