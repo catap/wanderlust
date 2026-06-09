@@ -308,10 +308,16 @@ Debug information is inserted in the buffer \"*IMAP4 DEBUG*\"")
   "Update size of selected mailbox in SESSION according to RESPONSE."
   (let ((exists (elmo-imap4-response-value-all response 'exists))
         (recent (elmo-imap4-response-value-all response 'recent))
+        (expunged 0)
         (current-size (or (elmo-imap4-session-current-mailbox-size-internal
                            session) (cons nil nil))))
+    (dolist (element response)
+      (if (eq (car element) 'expunge)
+          (setq expunged (1+ expunged))))
     (if exists (setcar current-size (if (atom exists)
                                         exists (car (last exists)))))
+    (if (and (not exists) (> expunged 0) (car current-size))
+        (setcar current-size (max 0 (- (car current-size) expunged))))
     (if recent (setcdr current-size (if (atom recent)
                                         recent (car (last recent)))))
     (elmo-imap4-session-set-current-mailbox-size-internal
@@ -2048,7 +2054,7 @@ Return nil if no complete line has arrived."
      (- (elmo-imap4-response-value status 'uidnext) 1)
      (elmo-imap4-response-value status 'messages))))
 
-(defun elmo-imap4-folder-list-range (folder min max)
+(defun elmo-imap4-folder-list-range (folder min max &optional flag)
   (elmo-imap4-list
    folder
    (concat
@@ -2060,16 +2066,35 @@ Return nil if no complete line has arrived."
           ;; What about elmo-imap4-use-uid?
           (format "uid %d:%s" (cdr (car killed)) max)
         (format "uid %s:%s" min max)))
-    " undeleted")))
+    " "
+    (or flag "undeleted"))))
 
 (luna-define-method elmo-folder-list-messages-plugged
   ((folder elmo-imap4-folder) &optional _enable-killed)
   (let* ((old (elmo-msgdb-list-messages (elmo-folder-msgdb folder)))
-         (new (elmo-imap4-folder-list-range
-               folder (1+ (or (elmo-folder-get-info-max folder) 0)) "*"))
-         (united-old-new (elmo-union old new)))
-    (if (= (length united-old-new) (or (elmo-folder-get-info-length folder) 0))
-        united-old-new
+         (session (elmo-imap4-get-session folder))
+         (mailbox (elmo-imap4-folder-mailbox-internal folder))
+         (new (progn
+                (when (elmo-imap4-mailbox-selected-p mailbox session)
+                  (if elmo-imap4-use-select-to-update-status
+                      (elmo-imap4-session-select-mailbox session mailbox 'force)
+                    (elmo-imap4-session-check session)))
+                (elmo-imap4-folder-list-range
+                 folder (1+ (or (elmo-folder-get-info-max folder) 0)) "*")))
+         (united-old-new (elmo-union old new))
+         (message-count (and session
+                             (car (elmo-imap4-session-current-mailbox-size-internal
+                                   session)))))
+    (if (= (length united-old-new)
+           (or message-count (elmo-folder-get-info-length folder) 0))
+        (let ((deleted (and old
+                            (elmo-imap4-folder-list-range
+                             folder
+                             1 (or (elmo-folder-get-info-max folder) 0)
+                             "deleted"))))
+          (if deleted
+              (car (elmo-list-diff united-old-new deleted))
+            united-old-new))
       (elmo-union new
                   (elmo-imap4-folder-list-range
                    folder

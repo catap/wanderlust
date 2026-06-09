@@ -713,7 +713,7 @@ Returns non-nil if bottom of message."
 		   (display-type (wl-message-make-display-type
 				  wl-summary-buffer-display-mime-mode
 				  wl-summary-buffer-display-header-mode))
-		   time1 time2)
+		   prefetched time1 time2)
 	      (when wl-message-buffer-prefetch-debug
 		(message "%d: count %d, hit %s" number count (buffer-name hit)))
 	      (if (and hit (buffer-live-p hit))
@@ -729,11 +729,25 @@ Returns non-nil if bottom of message."
 		(when wl-message-buffer-prefetch-debug
 		  (setq time1 (current-time))
 		  (message "Prefetching %d..." number))
-		(wl-message-buffer-display folder number
-					   display-type nil 'unread)
-		(when (elmo-message-use-cache-p folder number)
-		  (elmo-message-set-cached folder number t))
-		(when wl-message-buffer-prefetch-debug
+		(setq prefetched
+		      (condition-case err
+			  (progn
+			    (wl-message-buffer-display folder number
+						       display-type nil 'unread)
+			    (when (elmo-message-use-cache-p folder number)
+			      (elmo-message-set-cached folder number t))
+			    t)
+			(error
+			 (if (string-match "\\`Cannot display message "
+					   (error-message-string err))
+			     (progn
+			       (wl-message-buffer-cache-delete key)
+			       (when wl-message-buffer-prefetch-debug
+				 (message "Prefetching %d...failed: %s"
+					  number (error-message-string err)))
+			       nil)
+			   (signal (car err) (cdr err))))))
+		(when (and prefetched wl-message-buffer-prefetch-debug)
 		  (setq time2 (current-time))
 		  (message "Prefetching %d...done(%f msec)."
 			   number

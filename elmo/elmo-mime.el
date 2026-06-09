@@ -332,11 +332,11 @@ If third optional argument ENTIRE is non-nil, fetch entire message at once."
 			      :rawbuf rawbuf
 			      :strategy strategy)))
 	  (t
-	   (with-current-buffer rawbuf
-	     (let (buffer-read-only)
-	       (erase-buffer)
-	       (elmo-message-fetch folder number strategy unread)))
-	   (mime-open-entity 'elmo-buffer rawbuf)))))
+	   (when (with-current-buffer rawbuf
+		   (let (buffer-read-only)
+		     (erase-buffer)
+		     (elmo-message-fetch folder number strategy unread)))
+	     (mime-open-entity 'elmo-buffer rawbuf))))))
 
 
 (defconst elmo-mime-inherit-field-list-from-enclosed
